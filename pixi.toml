@@ -1,0 +1,23 @@
+[workspace]
+name = "mojo-backend"
+version = "0.1.0"
+authors = ["Marius S <marius@seritan.net>"]
+description = "Native-Mojo GPU re-implementation of millrace inference: a hardcoded Qwen2.5-0.5B-Instruct forward pass on Apple Silicon (Metal). See ARCHITECTURE.md."
+# Nightly Mojo: we need the current std.gpu / TileTensor GPU API (per the
+# modular `mojo-gpu-fundamentals` skill). No flare/MAX runtime dep yet — the
+# engine is pure Mojo (ARCHITECTURE.md §1, §8); serving is Phase 6.
+channels = [
+    "https://conda.modular.com/max-nightly",
+    "conda-forge",
+]
+platforms = ["osx-arm64"]
+
+[dependencies]
+mojo = "*"
+
+[tasks]
+# Phase 0 go/no-go: confirm a hand-written Mojo Metal kernel runs and computes
+# correctly on this M4 (re-confirms max-backend §8 #2 rung 1) before betting the
+# project on the GPU-only path. Exits non-zero on any mismatch / no accelerator.
+gpu-hello = "mojo run src/gpu_hello.mojo"
+build-gpu-hello = "mkdir -p build && mojo build src/gpu_hello.mojo -o build/gpu_hello"

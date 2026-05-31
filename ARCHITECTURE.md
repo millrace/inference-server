@@ -255,12 +255,18 @@ HTTP surface is ported from max-backend in a later phase (§6).
 
 ## 6. Phased roadmap
 
+The ordering is deliberately **risk-first**: prove the one kernel that can sink
+the GPU-only thesis (attention + RoPE — the exact piece MAX got wrong on Metal,
+max-backend §8 #2 rung 6) *before* investing in the loader, tokenizer, and the
+known-reachable kernels around it. Attention is a pure function of (Q, K, V,
+positions), so it is verifiable in isolation with no other component built.
+
 | Phase | Delivers |
 |---|---|
-| **0 — Scaffold** | pixi env (Mojo toolchain + GPU/Metal; MAX only in a test feature), repo layout, this doc. A Mojo GPU "hello kernel" runs on the M4 (re-confirms max-backend rung 1). |
-| **1 — Weights + tokenizer** | safetensors loader (bf16→f32, upload to device), byte-level BPE encode/decode verified against `transformers` token ids. |
-| **2 — GPU kernels (isolated)** | Each op as a Mojo Metal kernel — matmul, RMSNorm, SiLU/SwiGLU MLP, RoPE, causal GQA attention — **each diffed against MAX-CPU/f32** in isolation. Attention+RoPE is the kernel to nail (max-backend rung 6). |
-| **3 — Forward pass** | One layer, then all 24, on GPU/f32. **Logits match MAX-CPU/f32** at the last prompt position (greedy argmax agrees). Layer-bisection (force 1/2/24 layers) localizes any divergence — the exact technique max-backend used (its §8 #2 rung 6). |
+| **0 — Scaffold** | pixi env (Mojo + GPU/Metal, nightly), repo layout, this doc. **A Mojo GPU hello kernel runs on the M4** — re-confirms max-backend rung 1 (hand-written Mojo Metal kernels execute *and* compute correctly) on a clean env, before betting the project on it. |
+| **1 — Attention + RoPE spike (the go/no-go gate)** | The risky kernel, first and alone. A Mojo Metal kernel for RoPE (split-half, θ=1e6) + causal GQA attention at the real Qwen2 dims (head_dim 64, 14:2 heads), **diffed against a from-scratch NumPy/torch reference** on both synthetic inputs and **captured-real layer Q/K/V fixtures dumped from MAX-CPU** (so it is tested on realistic magnitudes, not just random). Adds the MAX-CPU oracle as a separate pixi feature/env. If this can't match the reference, the GPU-only thesis is wrong — and we learn it on day one, not after building everything else. |
+| **2 — Remaining kernels + loader + tokenizer** | The known-reachable work (max-backend rungs 1–5 already proved matmul/norm/SiLU/MLP correct on Metal): matmul, RMSNorm, SwiGLU MLP GPU kernels; safetensors loader (bf16→f32, device upload); byte-level BPE encode/decode verified against `transformers` ids. Each kernel diffed against MAX-CPU/f32. |
+| **3 — Forward pass** | Assemble embed → 24 layers → final norm → tied head on GPU/f32. **Logits match MAX-CPU/f32** at the last prompt position (greedy argmax agrees). Layer-bisection (force 1/2/24 layers) localizes any divergence — the exact technique max-backend used (its §8 #2 rung 6). |
 | **4 — Decode loop + KV cache** | Prefill + incremental greedy decode on-device, EOS handling, `--max-tokens`. **Token-for-token greedy parity** with MAX-CPU on the conformance prompts (§7). |
 | **5 — Sampling** | temperature/top-k/top-p/repetition-penalty per `generation_config.json` (§5.6). |
 | **6 — Serve** | Port max-backend's flare HTTP layer (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`) onto this engine — now a *pure-Mojo, GPU* request path end to end, **no Python/MAX at runtime**. |
@@ -330,12 +336,13 @@ runtime path.
    6). We are rewriting it by hand on the same Metal backend, so the rotate-half
    convention, the f32 inv-freq, and the GQA head-grouping (7:1) are where a
    subtly wrong-but-plausible result hides. Per-kernel isolation against MAX-CPU
-   (§7 signal 2) is the mitigation; it is the first kernel to prove out (Phase 2).
+   (§7 signal 2) is the mitigation; it is the **first kernel built (Phase 1)** —
+   the whole roadmap is ordered to hit this risk before anything else.
 4. **Mojo GPU / Metal maturity.** Mojo's native Metal backend is early
    (max-backend §2). The reassurance: max-backend's ladder ran hand-written Mojo
    GPU kernels *correctly* on this M4 (rungs 1–2), so the primitives we need are
    reachable — but stdlib GPU coverage (reductions, atomics, layout helpers) may
-   have gaps we hit. Surface them early in Phase 0/2.
+   have gaps we hit. Surface them early in Phase 0/1.
 5. **GPU performance.** A naive kernel-per-op with host syncs each step may be
    slow; acceptable for v1 (correctness first), revisit with fusion/tiling and
    keeping the decode loop on-device (§5.5).

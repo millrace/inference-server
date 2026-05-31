@@ -1,0 +1,21 @@
+[workspace]
+name = "import-model"
+version = "0.1.0"
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[dependencies]
+max = ">=26.3.0,<27"
+python = ">=3.12,<3.15"
+huggingface_hub = ">=0.26"
+safetensors = ">=0.4"
+transformers = ">=4.45"
+pytorch = ">=2.4"
+pydantic = ">=2.13.4,<3"
+
+[tasks]
+test-scripts = { cwd = "scripts", cmd = "python test_scripts.py" }
+inspect = { cwd = "scripts", cmd = "python inspect_hf.py" }
+list-keys = { cwd = "scripts", cmd = "python list_checkpoint_keys.py" }
+list-archs = { cwd = "scripts", cmd = "python list_native_archs.py" }
+check-walls = { cwd = "scripts", cmd = "python check_walls.py" }
