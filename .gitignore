@@ -12,3 +12,7 @@ __pycache__/
 # Real-weight kernel fixtures are large (full Qwen2 dims) — regenerate with
 # `pixi run kernels-capture`. The small synthetic ones (syn_*) stay committed.
 tests/fixtures/kernels/real_*
+
+# Loader fixtures reference a machine-specific checkpoint path; regenerate with
+# `pixi run loader-capture`.
+tests/fixtures/loader/

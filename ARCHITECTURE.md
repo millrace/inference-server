@@ -415,4 +415,10 @@ Run on this machine (osx-arm64, Apple M4, Mojo 1.0.0b2 nightly).
    + activations. References cross-checked against HF to ≤ 2.4e-7. With Phase-1
    attention, every compute kernel the forward pass needs is now verified on
    Metal. `pixi run kernels-capture` then `pixi run kernels-spike`.
-   *(Remaining Phase-2: safetensors loader, BPE tokenizer.)*
+5. **Safetensors loader reads the real checkpoint (Phase 2).** A hand-written
+   Mojo header parser (8-byte LE length + JSON) locates tensors and decodes bf16
+   → f32 (`f32_bits = u16 << 16`, exact). Verified **bit-exact (0.0)** vs torch
+   on 6 real Qwen2 tensors (embeddings, norms, q-proj weight+bias, deep-layer
+   MLP) — dtype `BF16`, shapes, and first elements all match.
+   `pixi run loader-capture` then `pixi run loader-spike`.
+   *(Remaining Phase-2: BPE tokenizer.)*

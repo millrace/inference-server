@@ -49,6 +49,10 @@ attn-kernel = "mojo run src/attention_spike.mojo"
 # SwiGLU MLP. `kernels-spike` verifies the Mojo Metal kernels against fixtures.
 kernels-spike = "mojo run src/kernels_spike.mojo"
 
+# Phase 2 safetensors loader (ARCHITECTURE.md §5.1): parse header, bf16→f32,
+# verify against real checkpoint values (needs `loader-capture` first).
+loader-spike = "mojo run src/loader_spike.mojo"
+
 [feature.oracle.tasks]
 # Generates tests/fixtures/attention/{synthetic,real_L0,real_L23}/ : q/k/v.bin,
 # expected.bin (NumPy ref), meta.txt. Also asserts NumPy ref ≈ HF context.
@@ -56,3 +60,5 @@ attn-capture = "python tests/manual/attention_spike/capture.py"
 # Generates tests/fixtures/kernels/{syn,real}_{rmsnorm,matmul,swiglu}/ and
 # cross-checks each NumPy reference against HF on real layer-0 activations.
 kernels-capture = "python tests/manual/kernels_spike/capture.py"
+# Dumps the real checkpoint path + expected first-8 values per tensor.
+loader-capture = "python tests/manual/loader_spike/capture.py"
