@@ -19,8 +19,10 @@ from std.gpu.host import DeviceContext
 
 from model import load_weights, generate, EOS1, EOS2
 from tokenizer import load_tokenizer
+from chat import load_chat_template, render_chat
 
 comptime MAX_NEW = 64
+comptime TEMPLATE = "assets/qwen2.5-chat-template.jinja"
 
 
 def read_text(path: String) raises -> String:
@@ -40,14 +42,6 @@ def ascii_str(bytes: List[UInt8]) -> String:
         s += chr(Int(bytes[i]))
     return s^
 
-def chat_prompt(user: String) -> String:
-    return String(
-        "<|im_start|>system\n"
-        "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n"
-        "<|im_start|>user\n"
-    ) + user + "<|im_end|>\n<|im_start|>assistant\n"
-
-
 def main() raises:
     var user = String("What is the capital of France?")
     if len(argv()) > 1:
@@ -63,7 +57,8 @@ def main() raises:
         ckpt = String(String(read_text("tests/fixtures/forward/meta.txt").split("\n")[1]).strip())
 
     var tok = load_tokenizer("tests/fixtures/tokenizer/")
-    var ids = tok.encode(to_bytes(chat_prompt(user)))
+    var tmpl = load_chat_template(TEMPLATE)
+    var ids = tok.encode(to_bytes(render_chat(tmpl, user)))
 
     print("loading weights…")
     var ctx = DeviceContext()

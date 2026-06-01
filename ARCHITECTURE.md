@@ -213,13 +213,19 @@ tokens (`<|im_start|>` etc.) are matched verbatim before BPE. This is a real
 component to build in Mojo (max-backend let MAX own it); pre-tokenization uses
 Qwen's GPT-2 regex split.
 
-### 5.3 Chat templating (minja2)
+### 5.3 Chat templating (minja2) — wired
 The prompt string is produced by [`../minja2`](../minja2/docs/requirements.md)
-rendering the Qwen2.5 `chat_template` (shipped in `tokenizer_config.json`, also
-in `minja2/tests/fixtures/chat_templates/Qwen__Qwen2.5-0.5B-Instruct.jinja`) with
-`add_generation_prompt=true`. minja2 already targets byte-identical output vs.
-`transformers.apply_chat_template`, so the prompt string is trusted; we feed it
-to the tokenizer (§5.2). No BOS is added (`bos_token: null`).
+rendering the real Qwen2.5 `chat_template` (vendored at
+`assets/qwen2.5-chat-template.jinja`) with `add_generation_prompt=true`.
+`src/chat.mojo` compiles the template once and renders it per request: the
+messages context is built as JSON and parsed into a minja2 `Value`
+(`render_chat`). minja2 compiles cleanly under the same 1.0.0b2 nightly the GPU
+engine needs (unlike flare, §11 #11) and is pulled in at build time via
+`-I ../minja2/src`. It targets byte-identical output vs.
+`transformers.apply_chat_template`, so the prompt is trusted; we feed it to the
+tokenizer (§5.2). No BOS is added (`bos_token: null`). The CLI (`pixi run chat`)
+and server (`pixi run serve`) both use this path; both still answer "What is the
+capital of France?" → "The capital of France is Paris."
 
 ### 5.4 KV cache
 Single-sequence cache of per-layer K and V (`[num_kv_heads=2, T, head_dim=64]`),
@@ -481,7 +487,8 @@ Run on this machine (osx-arm64, Apple M4, Mojo 1.0.0b2 nightly).
     weight load → greedy `generate` → `tokenizer.decode`. `pixi run chat --
     "What is the capital of France?"` → `The capital of France is Paris.`; a haiku
     prompt yields a coherent haiku. The first fully self-contained run of the
-    engine as an application. (Full Jinja templating via ../minja2 remains — §5.3.)
+    engine as an application. (Now renders the real chat template via ../minja2,
+    §5.3 — the hardcoded template it shipped with was replaced.)
 
 11. **OpenAI-compatible HTTP server works — via libc sockets, not flare (Phase
     6b, ✅ with a deviation).** The plan was to port max-backend's flare HTTP
@@ -513,15 +520,22 @@ files are thin verification gates that drive it against the `*-capture` fixtures
   loader, the op launchers over the kernels, `Weights`, `layer_cached` (prefill
   and decode), `argmax_last`, and greedy `generate`. Hardcoded to Qwen2.5-0.5B.
 - `src/tokenizer.mojo` — byte-level BPE `Tokenizer` + `load_tokenizer`.
+- `src/chat.mojo` — chat-template rendering via ../minja2 (`load_chat_template`,
+  `render_chat`); built with `-I ../minja2/src`. Template at
+  `assets/qwen2.5-chat-template.jinja`.
 - `src/testio.mojo` — fixture readers + device-buffer comparison helpers (gates only).
+
+**Applications (`main`):**
+- `src/main.mojo` — the `chat` CLI (prompt → text). `src/server.mojo` — the
+  `serve` HTTP server. Both: minja2 template → tokenizer → GPU `generate` → JSON/text.
 
 **Gates (`main`, import the library) and their oracle captures:**
 - `test_attention` ← `attn-capture` · `test_kernels` ← `kernels-capture`
 - `test_loader` ← `loader-capture` · `test_tokenizer` ← `tok-capture`
 - `test_forward` ← `forward-capture` · `test_generate` ← `generate-capture`
-- `gpu_hello` — the Phase-0 standalone Metal smoke check.
+- `test_sample` ← `sample-capture` · `gpu_hello` — Phase-0 Metal smoke check.
 
 A `pixi run test-<x>` runs a gate (default env, GPU); `pixi run <x>-capture`
 regenerates its fixtures from HF/torch (oracle env). The capture scripts live in
-`tests/manual/<x>_spike/`. Not yet built: the chat-template path via minja2
-(§5.3) and the HTTP server (§6 Phase 6).
+`tests/manual/<x>_spike/`. Remaining: full Jinja coverage is minja2's domain
+(its conformance suite); the server stays minimal (no SSE/concurrency, §11 #11).

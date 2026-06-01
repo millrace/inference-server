@@ -20,6 +20,9 @@ from std.gpu.host import DeviceContext
 
 from model import Weights, load_weights, generate, EOS1, EOS2
 from tokenizer import Tokenizer, load_tokenizer
+from chat import load_chat_template, render_chat, json_escape
+
+comptime TEMPLATE = "assets/qwen2.5-chat-template.jinja"
 
 comptime PORT_HI = 0x1F        # 8000 = 0x1F40, big-endian
 comptime PORT_LO = 0x40
@@ -44,34 +47,6 @@ def ascii_str(bytes: List[UInt8]) -> String:
     for i in range(len(bytes)):
         s += chr(Int(bytes[i]))
     return s^
-
-def chat_prompt(user: String) -> String:
-    return String(
-        "<|im_start|>system\n"
-        "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n"
-        "<|im_start|>user\n"
-    ) + user + "<|im_end|>\n<|im_start|>assistant\n"
-
-
-def json_escape(s: String) -> String:
-    var out = String("")
-    var sb = s.as_bytes()
-    for i in range(len(sb)):
-        var c = Int(sb[i])
-        if c == 34:
-            out += "\\\""
-        elif c == 92:
-            out += "\\\\"
-        elif c == 10:
-            out += "\\n"
-        elif c == 13:
-            out += "\\r"
-        elif c == 9:
-            out += "\\t"
-        else:
-            out += chr(c)
-    return out^
-
 
 def last_content(req: String) -> String:
     """Crude extraction of the final "content":"…" string value in the body."""
@@ -134,6 +109,7 @@ def main() raises:
     var ckpt = String(read_text("tests/fixtures/forward/meta.txt").split("\n")[1]).strip()
     print("loading tokenizer + weights…")
     var tok = load_tokenizer("tests/fixtures/tokenizer/")
+    var tmpl = load_chat_template(TEMPLATE)
     var ctx = DeviceContext()
     var w = load_weights(ctx, String(ckpt))
 
@@ -168,7 +144,7 @@ def main() raises:
         else:
             var user = last_content(req)
             print("  prompt: ", user, sep="")
-            var ids = tok.encode(to_bytes(chat_prompt(user)))
+            var ids = tok.encode(to_bytes(render_chat(tmpl, user)))
             var gen = generate(ctx, w, ids, MAX_NEW)
             var body_ids = List[Int]()
             for i in range(len(gen)):

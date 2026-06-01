@@ -71,11 +71,12 @@ test-sample = "mojo run src/test_sample.mojo"
 # Phase 6a end-to-end chat CLI (ARCHITECTURE.md §6): prompt -> text, pure Mojo on
 # the GPU. Usage: pixi run chat -- "Your question". Needs tok-capture (tokenizer
 # tables) + a checkpoint path ($QWEN_SAFETENSORS or forward-capture's meta).
-chat = { cmd = "mkdir -p build && mojo build src/main.mojo -o build/chat && ./build/chat" }
+chat = { cmd = "mkdir -p build && mojo build src/main.mojo -I ../minja2/src -o build/chat && ./build/chat" }
 
 # Phase 6b minimal OpenAI-compatible HTTP server, pure Mojo via libc sockets (no
 # flare — it needs Mojo 1.0.0b1; §11 #11). Listens on 127.0.0.1:8000.
-serve = { cmd = "mkdir -p build && mojo build src/server.mojo -o build/server && ./build/server" }
+# -I ../minja2/src: chat-template rendering (§5.3).
+serve = { cmd = "mkdir -p build && mojo build src/server.mojo -I ../minja2/src -o build/server && ./build/server" }
 
 [feature.oracle.tasks]
 # Generates tests/fixtures/attention/{synthetic,real_L0,real_L23}/ : q/k/v.bin,
