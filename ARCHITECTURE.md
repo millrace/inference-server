@@ -563,16 +563,33 @@ Run on this machine (osx-arm64, Apple M4, Mojo 1.0.0b2 nightly).
     short context, of which the **logits matmul is ~6 ms** (M=1·K=896·N=151936,
     ≈90 GB/s) and the **24 layers ≈35 ms**. Crucially the step does ~1 GFLOP and
     streams ~2 GB of f32 weights, so at 41 ms it runs at ~25 GFLOP/s / ~50 GB/s —
-    **neither compute- nor bandwidth-bound, but bound by the long serial chain of
-    ~300 small dependent kernel dispatches** (buffer alloc is only ~3 µs/op;
-    bf16 weights would not help much at 50 GB/s). Confirmed negatively: fusing
-    the two per-layer residual `add`s into the matmul epilogue removed 48
-    launches/token but moved decode 0% (the cheap elementwise ops weren't on the
-    critical path) — so that change was reverted. **The real lever is fewer,
-    bigger *matmul* dispatches:** fuse Q/K/V into one projection and gate/up into
-    one (concatenated weights at load), and/or a fused-attention / fused-MLP
-    megakernel — layout-aware work (the fused QKV output interleaves per token,
-    so prefill attention indexing must follow), deferred as the next perf phase.
+    **neither compute- nor bandwidth-bound** (buffer alloc is only ~3 µs/op).
+    A decomposed profile pinned it down: **forward layer stack ≈41 ms** (the
+    whole cost), logits ≈7 ms, argmax ≈0.09 ms.
+
+    **Fusion phase — a decisive negative result.** Two rounds of kernel fusion
+    were implemented, verified parity-preserving, measured, and **reverted for
+    zero gain**: (a) folding the two per-layer residual `add`s into the matmul
+    epilogue (−48 launches/token → 0%); (b) fusing Q/K/V into one projection and
+    gate/up into one, via a multi-output GEMV that scatters each segment to its
+    own contiguous buffer (−72 launches/token → 0%, microbench 24.3→24.4 tok/s).
+    The reason: **decode is bound by the cost of the *matmul kernels* on the
+    layer's serial dependency chain, not by dispatch count.** Q/K/V and gate/up
+    are mutually *independent* (all read the same normed input), so collapsing
+    them shortens neither the critical path nor the total matmul work — and the
+    elementwise add/norm kernels are too cheap to matter. The warp-per-output
+    GEMV itself is the bottleneck: the isolated lm-head matmul runs at ~90 GB/s
+    / ~1 % of FLOP peak, and the small per-layer matmuls are launch-latency
+    bound. **So the levers that would actually move decode are: (1) a faster
+    matmul kernel** — vectorized (`float4`) coalesced loads, higher
+    threads-per-output occupancy, and/or **bf16-resident weights** to halve the
+    lm-head's ~90 GB/s traffic — **and (2) a per-layer megakernel** that collapses
+    the ~10-deep dependent-dispatch chain (rmsnorm→qkv→attn→o→add→rmsnorm→mlp→add)
+    into one launch, attacking the per-dispatch latency floor directly. Both are
+    substantial, independent efforts; (1) is the more tractable next step and
+    helps the single biggest op (logits). The attention kernel also recomputes
+    RoPE `exp/log/cos/sin` per key per step — precomputing/caching rotated K is a
+    further win as context grows (it explains the ~24→~14 tok/s short-vs-long gap).
 
 ## 12. Code layout
 
