@@ -105,6 +105,9 @@ opencode = { cmd = "CFG=$(python3 $PIXI_PROJECT_ROOT/opencode_config.py http://1
 # The loader auto-detects single-file vs sharded / 0.5B vs 3B. Usage:
 #   pixi run -e oracle download-model -- Qwen/Qwen2.5-3B-Instruct
 download-model = "python tests/manual/download_model.py"
+# List cached models that have real safetensors weights and flag which `serve`
+# accepts (hidden 896 -> 0.5B, 2048 -> 3B). Usage: pixi run -e oracle list-models
+list-models = "python tests/manual/list_models.py"
 # Generates tests/fixtures/attention/{synthetic,real_L0,real_L23}/ : q/k/v.bin,
 # expected.bin (NumPy ref), meta.txt. Also asserts NumPy ref ≈ HF context.
 attn-capture = "python tests/manual/attention_spike/capture.py"
