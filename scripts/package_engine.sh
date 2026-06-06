@@ -4,7 +4,7 @@
 # downloads, then `mojo build`s on-device against a separately-fetched Mojo
 # compiler (see millrace/app Bootstrapper). The bundle unzips to three siblings:
 #
-#   mojo-backend/   src + assets + tokenizer fixtures +
+#   mojo-backend/   src + assets +
 #                   build/{libflare_tls.so + libssl.3 + libcrypto.3, rpath-fixed}
 #   minja2/src/     vendored minja2 (chat templating / JSON)
 #   flare/flare/    vendored flare package (HTTP server)
@@ -31,12 +31,12 @@ STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 B="$STAGE/mojo-backend"
 
 echo "==> staging mojo-backend source" >&2
-mkdir -p "$B/build" "$B/tests/fixtures/tokenizer"
+# src + assets (chat template). The tokenizer + model weights are NOT bundled —
+# they're generated/large and ride with the separate model download (the runner
+# fetches them at runtime), so the engine bundle stays small and model-agnostic.
+mkdir -p "$B/build"
 cp -R "$ROOT/src" "$B/src"
 cp -R "$ROOT/assets" "$B/assets"
-for f in vocab.tsv merges.tsv specials.tsv; do
-    cp "$ROOT/tests/fixtures/tokenizer/$f" "$B/tests/fixtures/tokenizer/"
-done
 
 echo "==> bundling libflare_tls.so + OpenSSL (relocatable)" >&2
 cp "$LIB" "$PREFIX/lib/libssl.3.dylib" "$PREFIX/lib/libcrypto.3.dylib" "$B/build/"
