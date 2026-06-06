@@ -1,6 +1,6 @@
 name: engine zip
 
-# Builds mojo-backend.zip — the engine source bundle the Millrace menu app
+# Builds runner.zip — the engine ("runner") source bundle the Millrace menu app
 # (millrace/app) downloads, then `mojo build`s on-device. See scripts/package_engine.sh.
 on:
   push:
@@ -37,18 +37,18 @@ jobs:
         working-directory: mojo-backend
         run: pixi run flare-tls
 
-      - name: Package mojo-backend.zip
+      - name: Package runner.zip
         working-directory: mojo-backend
-        run: pixi run bash scripts/package_engine.sh "$GITHUB_WORKSPACE/mojo-backend.zip"
+        run: pixi run bash scripts/package_engine.sh "$GITHUB_WORKSPACE/runner.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mojo-backend-zip
-          path: mojo-backend.zip
+          name: runner-zip
+          path: runner.zip
           if-no-files-found: error
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: mojo-backend.zip
+          files: runner.zip

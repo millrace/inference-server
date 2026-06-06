@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build mojo-backend.zip — the engine source bundle the Millrace menu app
+# Build runner.zip — the engine ("runner") source bundle the Millrace menu app
 # downloads, then `mojo build`s on-device against a separately-fetched Mojo
 # compiler (see millrace/app Bootstrapper). The bundle unzips to three siblings:
 #
@@ -22,7 +22,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MINJA2="${MINJA2:-$ROOT/../minja2}"
 FLARE="${FLARE:-$ROOT/../flare}"
-OUT="${1:-$ROOT/mojo-backend.zip}"
+OUT="${1:-$ROOT/runner.zip}"
 PREFIX="${CONDA_PREFIX:?run via pixi — need CONDA_PREFIX for libflare_tls.so + OpenSSL}"
 LIB="$PREFIX/lib/libflare_tls.so"
 [[ -f "$LIB" ]] || { echo "error: $LIB missing — run 'pixi run flare-tls' first" >&2; exit 1; }
