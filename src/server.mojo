@@ -253,10 +253,26 @@ def slice_bytes(b: List[UInt8], start: Int, stop: Int) -> List[UInt8]:
 struct Reply(Movable):
     var ids: List[Int]      # generated token ids (EOS dropped)
     var stopped: Bool       # True if generation ended on EOS, False if length cap
+    # Per-request stats (also printed to stdout) — surfaced to clients as a
+    # non-standard `"millrace"` field so a UI can show prefill cost + throughput.
+    var n_prompt: Int       # prompt tokens
+    var reused: Int         # prompt tokens served from the KV cache (not recomputed)
+    var prefilled: Int      # prompt tokens actually prefilled this request
+    var pf_ms: Float64      # prefill wall-clock (ms)
+    var dec_ms: Float64     # decode wall-clock (ms)
+    var tps: Float64        # decode throughput (tokens/sec)
 
-    def __init__(out self, var ids: List[Int], stopped: Bool):
+    def __init__(out self, var ids: List[Int], stopped: Bool, n_prompt: Int = 0,
+                 reused: Int = 0, prefilled: Int = 0, pf_ms: Float64 = 0.0,
+                 dec_ms: Float64 = 0.0, tps: Float64 = 0.0):
         self.ids = ids^
         self.stopped = stopped
+        self.n_prompt = n_prompt
+        self.reused = reused
+        self.prefilled = prefilled
+        self.pf_ms = pf_ms
+        self.dec_ms = dec_ms
+        self.tps = tps
 
 
 def gen_full(mut s: ServerState, ids: List[Int], max_new: Int,
@@ -347,7 +363,7 @@ def gen_full(mut s: ServerState, ids: List[Int], max_new: Int,
     print("  gen: prompt=", len(ids), "tok (reused ", reuse, ", prefilled ",
           len(suffix), ")  prefill=", Int(pf_ms + 0.5), "ms  decode=", len(gen),
           "tok ", Int(dec_ms + 0.5), "ms (", Int(tps + 0.5), " tok/s)", sep="")
-    return Reply(gen^, stopped)
+    return Reply(gen^, stopped, len(ids), reuse, len(suffix), pf_ms, dec_ms, tps)
 
 
 # ── JSON envelopes ───────────────────────────────────────────────────────────
@@ -400,27 +416,45 @@ def embeddings_json(model: String, data: String, n_tok: Int) -> String:
         + ',"total_tokens":' + String(n_tok) + "}}"
     )
 
-def completion_json(model: String, content: String, n_prompt: Int, n_gen: Int, finish: String) -> String:
+def millrace_stats(r: Reply) -> String:
+    """The non-standard `millrace` stats object (prefill cost + decode throughput).
+    Additive top-level field — OpenAI clients ignore unknown fields, a millrace
+    UI reads it. Mirrors the `gen:` line the server logs to stdout."""
+    return (
+        '{"prefill_ms":' + String(Int(r.pf_ms + 0.5))
+        + ',"decode_ms":' + String(Int(r.dec_ms + 0.5))
+        + ',"tok_per_s":' + String(Int(r.tps + 0.5))
+        + ',"prompt_tokens":' + String(r.n_prompt)
+        + ',"reused":' + String(r.reused)
+        + ',"prefilled":' + String(r.prefilled)
+        + ',"gen_tokens":' + String(len(r.ids)) + "}"
+    )
+
+def completion_json(model: String, content: String, n_prompt: Int, n_gen: Int,
+                    finish: String, millrace: String = String("")) -> String:
+    var extra = (',"millrace":' + millrace) if millrace.byte_length() > 0 else String("")
     return (
         '{"id":"chatcmpl-millrace","object":"chat.completion","created":0,"model":"'
         + model + '","choices":[{"index":0,"message":{"role":"assistant","content":"'
         + content + '"},"finish_reason":"' + finish + '"}],'
         + '"usage":{"prompt_tokens":' + String(n_prompt)
         + ',"completion_tokens":' + String(n_gen)
-        + ',"total_tokens":' + String(n_prompt + n_gen) + "}}"
+        + ',"total_tokens":' + String(n_prompt + n_gen) + "}" + extra + "}"
     )
 
-def chunk_json(model: String, delta: String, finish: Bool, fin: String) -> String:
+def chunk_json(model: String, delta: String, finish: Bool, fin: String,
+               millrace: String = String("")) -> String:
     var delta_obj = String("{}")
     var finish_reason = String("null")
     if finish:
         finish_reason = '"' + fin + '"'
     else:
         delta_obj = '{"content":"' + delta + '"}'
+    var extra = (',"millrace":' + millrace) if millrace.byte_length() > 0 else String("")
     return (
         '{"id":"chatcmpl-millrace","object":"chat.completion.chunk","created":0,"model":"'
         + model + '","choices":[{"index":0,"delta":' + delta_obj
-        + ',"finish_reason":' + finish_reason + "}]}"
+        + ',"finish_reason":' + finish_reason + "}]" + extra + "}"
     )
 
 # ── tool-calling envelopes (chat: `tool_calls`; responses: `function_call`) ──
@@ -680,18 +714,21 @@ struct Api(Handler, Copyable, Movable):
                     return sse_response(ch)
                 return ok_json(completion_tools_json(s.model_id, tc.content, tc.calls, len(ids), len(r.ids)))
 
+        var stats = millrace_stats(r)
         if want_stream:
             var ch = SseChannel()
             var deltas = stream_deltas(s, r.ids)
             for i in range(len(deltas)):
                 ch.push(SseEvent.message(chunk_json(s.model_id, deltas[i], False, fin)))
-            ch.push(SseEvent.message(chunk_json(s.model_id, "", True, fin)))
+            # The final chunk carries the millrace stats (generation is already
+            # done by here, so they're complete).
+            ch.push(SseEvent.message(chunk_json(s.model_id, "", True, fin, stats)))
             ch.push(SseEvent.message("[DONE]"))
             ch.close()
             return sse_response(ch)
 
         var content = json_escape_str(s.tok.decode(r.ids))
-        return ok_json(completion_json(s.model_id, content, len(ids), len(r.ids), fin))
+        return ok_json(completion_json(s.model_id, content, len(ids), len(r.ids), fin, stats))
 
     def handle_responses(self, req: Request) raises -> Response:
         ref s = self.st[]
