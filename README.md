@@ -37,18 +37,25 @@ higher-is-better for decode.
 | prefill, ~70-tok prompt (ms)  |      ~390 (was 540) |       220   |         165    |
 | prefill, ~1.5K-tok prompt (s) |       ~8 (was 22) |       2.8   |         2.9    |
 
-We're ~3× slower on decode and several× on prefill. The decode gap is **per-token
-Metal dispatch overhead**: a profiler (`.scratch/decode_prof.mojo`) shows decode is
-**CPU-encode bound, not GPU bound** — enqueue-only time ≈ total-with-GPU-drain, so
-the GPU finishes in the drain while the CPU spends the whole token encoding
-dispatches (`enqueue_function` ≈ 33 µs/call for 1 arg, ~110 µs for the multi-arg
-matmuls; `enqueue_create_buffer` is ~1 µs, negligible). The only lever is **dispatch
-count**, so the per-layer chain was fused from **11 → 6 kernels**: RMSNorm folded
+We're ~3× slower on decode and several× on prefill. Decode is **GPU-bound** — and
+specifically **memory-bandwidth bound on the M=1 int4 GEMV**: streaming the ~1.4 GB
+of int4 weights once per token takes ~43 ms on the 3B (≈ 32 GB/s effective, far
+under the M4's ~100 GB/s peak), so the decode GEMVs are leaving bandwidth on the
+table (occupancy / ALU-unpack limited). A no-op control — issuing the *same* per-token
+dispatch count as trivial kernels — costs only ~5 ms (0.5B) / ~7 ms (3B), i.e. CPU
+dispatch issuing is just ~13–22 % of per-token time (`enqueue_function` ≈ 33 µs/call,
+`enqueue_create_buffer` ~1 µs). *(An earlier note here called decode "CPU-encode
+bound" from an enqueue-only ≈ total measurement — that was a Metal command-queue
+**back-pressure** artifact: `enqueue_function` blocks on the full queue, so its time
+tracks GPU progress, not CPU encode. The no-op control settles it: decode is GPU-bound.)*
+The per-layer chain was still usefully fused from **11 → 6 kernels** — RMSNorm folded
 into the following GEMV (each decode warp already streams the row, so it accumulates
 Σx² in the same K-loop), SwiGLU folded onto the down-proj input, `rope_k`+V-copy
-merged into one launch, and `rope_q` folded into the attention kernel (Q rotated on
-load). Measured **36.5 → 51.6 tok/s on 0.5B bf16** (+41 %), greedy output
-byte-identical. The decode-fusion kernels (`matmul_norm`/`matmul_q4_norm`,
+merged into one launch, `rope_q` folded into the attention kernel (Q rotated on load)
+— which gave **36.5 → 51.6 tok/s on 0.5B bf16** (+41 %, greedy byte-identical) by
+cutting *both* dispatches *and* intermediate-tensor global round-trips. But the
+**larger remaining decode lever is making the M=1 int4 GEMV bandwidth-optimal**, not
+further dispatch reduction. The decode-fusion kernels (`matmul_norm`/`matmul_q4_norm`,
 `matmul_silu_resid`/`matmul_q4_silu_resid`, `rope_kv`, `attn_cached_rope`) are
 decode-only (M=1); prefill keeps the separate kernels (it's GEMM-bound, not
 dispatch-bound). The prefill gap **used to be a fragment-ABI ceiling**; that ceiling is now
